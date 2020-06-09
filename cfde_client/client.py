@@ -378,13 +378,6 @@ class CfdeClient():
         # Set path on destination (FAIR RE EP)
         dest_path = "{}{}".format(CONFIG["EP_DIR"], os.path.basename(data_path))
 
-        # If doing dry run, stop here before making Flow input
-        if dry_run:
-            return {
-                "success": True,
-                "message": "Dry run validated successfully. No data was transferred."
-            }
-
         # Set up Flow
         if verbose:
             print("Creating input for Flow")
@@ -409,9 +402,10 @@ class CfdeClient():
             if server:
                 flow_input["server"] = server
         # Otherwise, we must PUT the BDBag on the FAIR RE EP
+        # Unless we're doing a dry-run, in which case we must skip the actual upload
         else:
             if verbose:
-                print("No Globus Endpoint detected; using HTTP upload instead")
+                print("No Globus Endpoint detected; falling back to HTTP upload")
             headers = {}
             self.__https_authorizer.set_authorization_header(headers)
             data_url = "{}{}".format(CONFIG["EP_URL"], dest_path)
@@ -419,28 +413,29 @@ class CfdeClient():
             with open(data_path, 'rb') as bag_file:
                 bag_data = bag_file.read()
 
-            put_res = requests.put(data_url, data=bag_data, headers=headers)
-
-            # Regenerate headers on 401
-            if put_res.status_code == 401:
-                self.__https_authorizer.handle_missing_authorization()
-                self.__https_authorizer.set_authorization_header(headers)
+            if not dry_run:
                 put_res = requests.put(data_url, data=bag_data, headers=headers)
 
-            # Error message on failed PUT or any unexpected response
-            if put_res.status_code >= 300:
-                return {
-                    "success": False,
-                    "error": ("Could not upload BDBag to server (error {}):\n{}"
-                              .format(put_res.status_code, put_res.content))
-                }
-            elif put_res.status_code != 200:
-                print("Warning: HTTP upload returned status code {}, which was unexpected."
-                      .format(put_res.status_code))
+                # Regenerate headers on 401
+                if put_res.status_code == 401:
+                    self.__https_authorizer.handle_missing_authorization()
+                    self.__https_authorizer.set_authorization_header(headers)
+                    put_res = requests.put(data_url, data=bag_data, headers=headers)
 
-            if verbose:
-                print("Upload successful to '{}': {} {}".format(data_url, put_res.status_code,
-                                                                put_res.content))
+                # Error message on failed PUT or any unexpected response
+                if put_res.status_code >= 300:
+                    return {
+                        "success": False,
+                        "error": ("Could not upload BDBag to server (error {}):\n{}"
+                                  .format(put_res.status_code, put_res.content))
+                    }
+                elif put_res.status_code != 200:
+                    print("Warning: HTTP upload returned status code {}, which was unexpected."
+                          .format(put_res.status_code))
+
+                if verbose:
+                    print("Upload successful to '{}': {} {}".format(data_url, put_res.status_code,
+                                                                    put_res.content))
 
             flow_id = self.flow_info["flow_id"]
             flow_input = {
@@ -464,6 +459,14 @@ class CfdeClient():
         # Random ID to use for User Option AP - requires unique ID
         # Time + 100-range randint should be more than enough
         flow_input["task_id"] = str(int(time.time())) + "X" + str(randint(0, 99))
+
+        # If doing a dry run, stop here before submission
+        if dry_run:
+            return {
+                "success": True,
+                "message": "Dry run created and validated successfully. No data was transferred."
+            }
+
         # Start Flow
         if verbose:
             print("Starting Flow - Submitting data")
