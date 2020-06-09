@@ -7,7 +7,7 @@ import time
 from random import randint
 
 from bdbag import bdbag_api
-from datapackage import Package
+import datapackage
 from fair_research_login import NativeClient
 import git
 import globus_automate_client
@@ -70,14 +70,40 @@ def ts_validate(data_path, schema=None):
             "error": "Path '{}' does not refer to a file".format(data_path)
         }
 
-    # Read into Package, return error on failure
+    # Read into Package, return error if invalid
     try:
-        pkg = Package(descriptor=data_path, strict=True)
-    except Exception as e:
+        datapackage.validate(data_path)
+        pkg = datapackage.Package(descriptor=data_path, strict=True)
+    # ValidationErrors don't show the actual error in the str/repr
+    except datapackage.exceptions.ValidationError as e:
         return {
             "is_valid": False,
             "raw_errors": e.errors,
-            "error": e.errors
+            "error": str(e.errors)
+        }
+    except Exception as e:
+        return {
+            "is_valid": False,
+            "raw_errors": [e],
+            "error": repr(e)
+        }
+
+    # Check each resource
+    try:
+        for r_name in pkg.resource_names:
+            resrc = pkg.get_resource(r_name)
+            resrc.read()
+    except datapackage.exceptions.ValidationError as e:
+        return {
+            "is_valid": False,
+            "raw_errors": e.errors,
+            "error": str(e.errors)
+        }
+    except Exception as e:
+        return {
+            "is_valid": False,
+            "raw_errors": [e],
+            "error": repr(e)
         }
 
     if schema:
