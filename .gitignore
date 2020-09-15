@@ -1,0 +1,7 @@
+*.egg-info*
+*.log
+*.pyc
+*.swp
+*keys.py
+*cfde-backup*
+*checkpoint.ipynb
