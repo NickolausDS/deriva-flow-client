@@ -5,7 +5,7 @@ import sys
 
 import click
 
-from cfde_client import CfdeClient, CONFIG
+from cfde_client import CfdeClient
 
 
 DEFAULT_STATE_FILE = os.path.expanduser("~/.cfde_client.json")
@@ -19,7 +19,7 @@ def cli():
 
 @cli.command()
 @click.argument("data-path", nargs=1, type=click.Path(exists=True))
-@click.option("--author-email", "--email", "-e", default=None)
+@click.option("--dcc-id", "--dcc", default=None, show_default=True)
 @click.option("--catalog", default=None, show_default=True)
 @click.option("--schema", default=None, show_default=True)
 @click.option("--acl-file", default=None, show_default=True, type=click.Path(exists=True))
@@ -27,6 +27,8 @@ def cli():
 @click.option("--delete-dir/--keep-dir", is_flag=True, default=False, show_default=True)
 @click.option("--ignore-git/--handle-git", is_flag=True, default=False, show_default=True)
 @click.option("--dry-run", is_flag=True, default=False, show_default=True)
+@click.option("--test-submission", "--test-sub", "--test-drive", is_flag=True,
+              default=False, show_default=True)
 @click.option("--verbose", "-v", is_flag=True, default=False, show_default=True)
 @click.option("--force-login", is_flag=True, default=False, show_default=True)
 # TODO: Debug "hidden" missing parameter
@@ -36,8 +38,8 @@ def cli():
 @click.option("--bag-kwargs-file", type=click.Path(exists=True), default=None)  # , hidden=True)
 @click.option("--client-state-file", type=click.Path(exists=True), default=None)  # , hidden=True)
 @click.option("--service-instance", default=None)  # , hidden=True)
-def run(data_path, author_email, catalog, schema, acl_file, output_dir, delete_dir, ignore_git,
-        dry_run, verbose, force_login, no_browser, server, force_http,
+def run(data_path, dcc_id, catalog, schema, acl_file, output_dir, delete_dir, ignore_git,
+        dry_run, test_submission, verbose, force_login, no_browser, server, force_http,
         bag_kwargs_file, client_state_file, service_instance):
     """Start the Globus Automate Flow to ingest CFDE data into DERIVA."""
     # Get any saved parameters
@@ -66,38 +68,42 @@ def run(data_path, author_email, catalog, schema, acl_file, output_dir, delete_d
     else:
         dataset_acls = None
 
-    # Determine author_email to use
+    # Determine DCC ID to use
     if verbose:
-        print("Determining author email")
-    # If user supplies email as option, will always use that as author_email
-    state_email = state.get("author_email")
-    # If supplied email is different from previously saved email, prompt to save
-    # Do not prompt if user has not saved email - user may not want to save email
-    if author_email is not None and state_email is not None and state_email != author_email:
+        print("Determining DCC")
+    # If user supplies DCC as option, will always use that
+    # If supplied DCC is different from previously saved DCC, prompt to save,
+    #   unless user has not saved DCC or disabled the save prompt
+    state_dcc = state.get("dcc_id")
+    never_save = state.get("never_save")
+    if not never_save and dcc_id is not None and state_dcc is not None and state_dcc != dcc_id:
         if verbose:
-            print("Saved email mismatch with provided email")
-        # author_email = author_email
-        save_email = (input("Would you like to save '{}' as your default email ("
-                            "instead of '{}')? y/n: ".format(author_email, state_email))
-                      .strip().lower() in ["y", "yes"])
-    elif author_email is None and state_email is not None:
-        author_email = state_email
-        save_email = False
-        print("Using saved email '{}'".format(author_email))
-    elif author_email is None and state_email is None:
+            print("Saved DCC '{}' mismatch with provided DCC '{}'".format(state_dcc, dcc_id))
+        save_dcc = (input("Would you like to save '{}' as your default DCC ID ("
+                          "instead of '{}')? y/n: ".format(dcc_id, state_dcc))
+                    .strip().lower() in ["y", "yes"])
+        if not save_dcc:
+            if (input("Would you like to disable this prompt permanently? y/n:").strip().lower()
+                    in ["y", "yes"]):
+                state["never_save_dcc"] = True
+    elif dcc_id is None and state_dcc is not None:
+        dcc_id = state_dcc
+        save_dcc = False
+        print("Using saved DCC '{}'".format(dcc_id))
+    elif dcc_id is None and state_dcc is None:
         if verbose:
-            print("No saved email found and no email provided")
-        author_email = input("Please enter your email address for curation and updates: ").strip()
-        save_email = input("Thank you. Would you like to save '{}' for future submissions? "
-                           "y/n: ".format(author_email)).strip().lower() in ["y", "yes"]
-    # Save email in state if requested
-    if save_email:
-        state["author_email"] = author_email
+            print("No saved DCC ID found and no DCC provided")
+        dcc_id = input("Please enter the CFDE identifier for your "
+                       "Data Coordinating Center: ").strip()
+        save_dcc = input("Thank you. Would you like to save '{}' for future submissions? "
+                         "y/n: ".format(dcc_id)).strip().lower() in ["y", "yes"]
+    # Save DCC ID in state if requested
+    if save_dcc:
+        state["dcc_id"] = dcc_id
         if verbose:
-            print("Email '{}' will be saved if the Flow initialization is successful "
+            print("DCC ID '{}' will be saved if the Flow initialization is successful "
                   "and this is not a dry run"
-                  .format(author_email))
-
+                  .format(dcc_id))
     try:
         if verbose:
             print("Initializing Flow")
@@ -105,11 +111,12 @@ def run(data_path, author_email, catalog, schema, acl_file, output_dir, delete_d
                           service_instance=service_instance)
         if verbose:
             print("CfdeClient initialized, starting Flow")
-        start_res = cfde.start_deriva_flow(data_path, author_email, catalog_id=catalog,
+        start_res = cfde.start_deriva_flow(data_path, dcc_id=dcc_id, catalog_id=catalog,
                                            schema=schema, dataset_acls=dataset_acls,
                                            output_dir=output_dir, delete_dir=delete_dir,
                                            handle_git_repos=(not ignore_git),
-                                           server=server, dry_run=dry_run, verbose=verbose,
+                                           server=server, dry_run=dry_run,
+                                           test_sub=test_submission, verbose=verbose,
                                            force_http=force_http, **bag_kwargs)
     except Exception as e:
         print("Error while starting Flow: {}".format(repr(e)))
@@ -120,25 +127,21 @@ def run(data_path, author_email, catalog, schema, acl_file, output_dir, delete_d
         else:
             print(start_res["message"])
             if not dry_run:
-                dest_path = start_res["fair_re_dest_path"]
-                dir_path = os.path.dirname(dest_path)
-                filename = os.path.basename(dest_path)
-                http_link = "{}{}".format(CONFIG["EP_URL"], dest_path)
-                globus_web_link = ("https://app.globus.org/file-manager?origin_id={}"
-                                   "&origin_path={}".format(CONFIG["EP_UUID"], dir_path))
                 state["service_instance"] = service_instance
                 state["flow_id"] = start_res["flow_id"]
                 state["flow_instance_id"] = start_res["flow_instance_id"]
-                state["http_link"] = http_link
-                state["globus_web_link"] = globus_web_link
+                state["http_link"] = start_res["http_link"]
+                state["globus_web_link"] = start_res["globus_web_link"]
                 with open(client_state_file, 'w') as out:
                     json.dump(state, out)
                 if verbose:
                     print("State saved to '{}'".format(client_state_file))
-                print("\nThe BDBag with your data is named '{}', and is available through Globus "
-                      "here:\n{}\n".format(filename, globus_web_link))
-                print("You BDBag is also available via direct HTTP download here:\n{}"
-                      .format(http_link))
+
+                filename = os.path.basename(start_res["cfde_dest_path"])
+                print("\nThe BDBag with your data is named '{}', and will be available through "
+                      "Globus here:\n{}\n".format(filename, state["globus_web_link"]))
+                print("You BDBag will also be available via direct HTTP download here:\n{}"
+                      .format(state["http_link"]))
 
 
 @cli.command()
@@ -146,7 +149,8 @@ def run(data_path, author_email, catalog, schema, acl_file, output_dir, delete_d
 @click.option("--flow-instance-id", default=None, show_default=True)
 @click.option("--raw", is_flag=True, default=False)
 @click.option("--client-state-file", type=click.Path(exists=True), default=None)  # , hidden=True)
-def status(flow_id, flow_instance_id, raw, client_state_file):
+@click.option("--service-instance", default=None)  # , hidden=True)
+def status(flow_id, flow_instance_id, raw, client_state_file, service_instance):
     """Check the status of a Flow."""
     if not flow_id or not flow_instance_id:
         if not client_state_file:
@@ -156,7 +160,7 @@ def status(flow_id, flow_instance_id, raw, client_state_file):
                 client_state = json.load(f)
             flow_id = flow_id or client_state.get("flow_id")
             flow_instance_id = flow_instance_id or client_state.get("flow_instance_id")
-            service_instance = client_state.get("service_instance")
+            service_instance = service_instance or client_state.get("service_instance")
             if not flow_id or not flow_instance_id:
                 raise ValueError("flow_id or flow_instance_id not found")
         except (FileNotFoundError, ValueError):
