@@ -24,7 +24,7 @@
             "cfde_ep_url": "https://g-3368fe.c0aba.03c0.data.globus.org"
         },
         "dev": {
-            "flow_id": "428be54c-7717-47d6-81d2-d800b58ebb4a",
+            "flow_id": "4317534e-98c7-4a9d-8a90-88df5899802e",
             "success_step": "SuccessState",
             "failure_step": "FailureState",
             "error_step": "ErrorState",
